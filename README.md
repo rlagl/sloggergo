@@ -1,3 +1,3 @@
 # sloggergo
 
-Golang library
+Golang library .
