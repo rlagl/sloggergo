@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/godeh/sloggergo/blob/main/config/schema.json",
+  "title": "sloggergo configuration",
+  "type": "object",
+  "properties": {
+    "logger": {
+      "type": "object",
+      "description": "Logger configuration.",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error", "fatal"],
+          "default": "info",
+          "description": "Minimum log level. Defaults to info."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["json", "text"],
+          "default": "text",
+          "description": "Output format. Defaults to text."
+        },
+        "time_format": {
+          "type": "string",
+          "default": "2006-01-02T15:04:05.999999999Z07:00",
+          "description": "Go time layout used for timestamps. Defaults to RFC3339Nano."
+        },
+        "add_caller": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include caller file:line in log entries. Defaults to true."
+        },
+        "stdout": {
+          "type": "object",
+          "description": "Stdout sink configuration.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "disable_colors": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
+        "file": {
+          "type": "object",
+          "description": "File sink configuration.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "path": {
+              "type": "string",
+              "description": "Path to the log file. Required when file output is enabled."
+            },
+            "max_size_mb": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "When > 0, rotate the log file once it exceeds this size (MB)."
+            },
+            "max_backups": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of rotated files to keep. If 0, rotated files are not kept."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": { "const": true }
+                }
+              },
+              "then": {
+                "required": ["path"]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

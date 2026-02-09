@@ -3,6 +3,7 @@ package sloggergo
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -258,24 +259,23 @@ func TestStdoutSink(t *testing.T) {
 }
 
 func TestNewFromConfig(t *testing.T) {
-	// Create temporary config file
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "app.log")
 	configContent := `{
-		"level": "INFO",
-		"fields": {
-			"app": "test-app"
-		},
-		"sinks": [
-			{
-				"type": "stdout",
-				"formatter": "json"
+		"logger": {
+			"level": "info",
+			"format": "text",
+			"stdout": { "enabled": false },
+			"file": {
+				"enabled": true,
+				"path": "` + logPath + `"
 			}
-		]
+		}
 	}`
-	configFile := "test_config.json"
+	configFile := filepath.Join(dir, "test_config.json")
 	if err := os.WriteFile(configFile, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("Failed to create config file: %v", err)
 	}
-	defer func() { _ = os.Remove(configFile) }()
 
 	log, err := NewFromConfig(configFile)
 	if err != nil {
@@ -284,4 +284,48 @@ func TestNewFromConfig(t *testing.T) {
 	defer func() { _ = log.Close() }()
 
 	log.Info("test from config")
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+	if !strings.Contains(string(data), "test from config") {
+		t.Fatalf("expected log file to contain message, got: %s", string(data))
+	}
+}
+
+func TestNewFromConfigRotation(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "app.log")
+	configContent := `{
+		"logger": {
+			"level": "info",
+			"format": "text",
+			"stdout": { "enabled": false },
+			"file": {
+				"enabled": true,
+				"path": "` + logPath + `",
+				"max_size_mb": 1,
+				"max_backups": 2
+			}
+		}
+	}`
+	configFile := filepath.Join(dir, "test_config.json")
+	if err := os.WriteFile(configFile, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("Failed to create config file: %v", err)
+	}
+
+	log, err := NewFromConfig(configFile)
+	if err != nil {
+		t.Fatalf("NewFromConfig() returned error: %v", err)
+	}
+	defer func() { _ = log.Close() }()
+
+	large := strings.Repeat("a", 900*1024)
+	log.Info("first", slog.String("payload", large))
+	log.Info("second", slog.String("payload", strings.Repeat("b", 200*1024)))
+
+	if _, err := os.Stat(logPath + ".1"); err != nil {
+		t.Fatalf("expected rotated file to exist: %v", err)
+	}
 }

@@ -3,10 +3,12 @@ package sloggergo
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 
 	"github.com/godeh/sloggergo/formatter"
+	"github.com/godeh/sloggergo/sink"
 )
 
 // AsyncLogger wraps a Logger with async capabilities.
@@ -15,11 +17,13 @@ type AsyncLogger struct {
 	buffer          chan *formatter.Entry
 	wg              sync.WaitGroup
 	closed          bool
-	closeMu         sync.Mutex
+	closeMu         sync.RWMutex
 	bufferSize      int
 	workers         int
 	sampling        *SamplingConfig
 	shutdownTimeout time.Duration
+	counts          map[string]*sampleCounter
+	countMu         sync.Mutex
 }
 
 // SamplingConfig configures log sampling.
@@ -74,6 +78,9 @@ func NewAsync(logger *Logger, opts ...AsyncOption) *AsyncLogger {
 	}
 
 	a.buffer = make(chan *formatter.Entry, a.bufferSize)
+	if a.sampling != nil {
+		a.counts = make(map[string]*sampleCounter)
+	}
 
 	// Start workers
 	for i := 0; i < a.workers; i++ {
@@ -89,7 +96,7 @@ func (a *AsyncLogger) worker() {
 
 	for entry := range a.buffer {
 		a.Logger.mu.RLock()
-		sinks := a.Logger.sinks
+		sinks := append([]sink.Sink(nil), a.Logger.sinks...)
 		errorHandler := a.Logger.errorHandler
 		a.Logger.mu.RUnlock()
 
@@ -110,27 +117,41 @@ func (a *AsyncLogger) logAsync(ctx context.Context, level Level, msg string, key
 		a.Logger.mu.RUnlock()
 		return
 	}
+	timeFormat := a.Logger.timeFormat
+	addCaller := a.Logger.addCaller
+	extractor := a.Logger.extractor
+	hooks := append([]Hook(nil), a.Logger.hooks...)
+	fields := make(map[string]any)
+	maps.Copy(fields, a.Logger.fields)
 	a.Logger.mu.RUnlock()
+
+	if a.sampling != nil && !a.shouldLog(msg) {
+		return
+	}
+
+	// Add context attributes if valid context and extractor is set
+	if ctx != nil && extractor != nil {
+		ctxAttrs := extractor(ctx)
+		if len(ctxAttrs) > 0 {
+			newKeyvals := make([]slog.Attr, 0, len(ctxAttrs)+len(keyvals))
+			newKeyvals = append(newKeyvals, ctxAttrs...)
+			newKeyvals = append(newKeyvals, keyvals...)
+			keyvals = newKeyvals
+		}
+	}
 
 	// Build entry
-	fields := make(map[string]any)
-	a.Logger.mu.RLock()
-	for k, v := range a.Logger.fields {
-		fields[k] = v
-	}
-	a.Logger.mu.RUnlock()
-
 	for _, val := range keyvals {
 		fields[val.Key] = val.Value.Any()
 	}
 
 	caller := ""
-	if a.Logger.addCaller {
+	if addCaller {
 		caller = getCaller(3)
 	}
 
 	entry := &formatter.Entry{
-		Time:    time.Now().Format(time.RFC3339Nano),
+		Time:    time.Now().Format(timeFormat),
 		Level:   level.String(),
 		Message: msg,
 		Fields:  fields,
@@ -138,12 +159,25 @@ func (a *AsyncLogger) logAsync(ctx context.Context, level Level, msg string, key
 		Context: ctx,
 	}
 
+	// Run hooks
+	for _, hook := range hooks {
+		if err := hook(ctx, entry); err != nil {
+			return
+		}
+	}
+
 	// Non-blocking send
+	a.closeMu.RLock()
+	if a.closed {
+		a.closeMu.RUnlock()
+		return
+	}
 	select {
 	case a.buffer <- entry:
 	default:
 		// Buffer full, drop log (or could count dropped)
 	}
+	a.closeMu.RUnlock()
 }
 
 // Debug logs a debug message asynchronously.
@@ -237,6 +271,34 @@ func (a *AsyncLogger) BufferLen() int {
 // IsFull returns true if the buffer is full.
 func (a *AsyncLogger) IsFull() bool {
 	return len(a.buffer) >= a.bufferSize
+}
+
+func (a *AsyncLogger) shouldLog(key string) bool {
+	a.countMu.Lock()
+	defer a.countMu.Unlock()
+
+	now := time.Now()
+	counter, exists := a.counts[key]
+
+	if !exists || now.After(counter.resetTime) {
+		a.counts[key] = &sampleCounter{
+			count:     1,
+			resetTime: now.Add(a.sampling.Interval),
+		}
+		return true
+	}
+
+	counter.count++
+
+	if counter.count <= a.sampling.Initial {
+		return true
+	}
+
+	if a.sampling.Thereafter > 0 && (counter.count-a.sampling.Initial)%a.sampling.Thereafter == 0 {
+		return true
+	}
+
+	return false
 }
 
 // --- Sampled Logger ---

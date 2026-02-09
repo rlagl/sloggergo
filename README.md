@@ -7,7 +7,7 @@ Go structured logger with zero dependencies by default.
 - **Zero Dependency**: Core library has 0 external dependencies.
 - **Extensible**: Interface-based usage for Sinks and Formatters.
 - **Async Support**: Native asynchronous logging with buffering.
-- **Observability Ready**: Built-in support (via standard library HTTP) for Elasticsearch, Loki, and Datadog.
+- **Observability Ready**: Custom sinks are easy to build (example provided for Elasticsearch).
 
 ## Usage
 
@@ -30,6 +30,34 @@ func main() {
     log.Info("Hello world")
 }
 ```
+
+## JSON Configuration
+
+```json
+{
+  "logger": {
+    "level": "info",
+    "format": "text",
+    "time_format": "2006-01-02T15:04:05.999999999Z07:00",
+    "add_caller": true,
+    "stdout": {
+      "enabled": true,
+      "disable_colors": false
+    },
+    "file": {
+      "enabled": true,
+      "path": "logs/app.log",
+      "max_size_mb": 10,
+      "max_backups": 3
+    }
+  }
+}
+```
+
+Schema and defaults:
+- Schema: `config/schema.json`
+- Defaults: `level=info`, `format=text`, `time_format=RFC3339Nano`, `add_caller=true`, `stdout.enabled=false`, `file.enabled=false`.
+- Rotation: `max_size_mb>0` enables rotation. When rotating, the current file is renamed to `.1`, existing backups shift up to `.N` (`max_backups`). If `max_backups=0`, rotated files are discarded.
 
 ## Examples
 

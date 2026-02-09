@@ -173,6 +173,13 @@ func (l *Logger) With(keyvals ...any) *Logger {
 
 	l.mu.RLock()
 	maps.Copy(fields, l.fields)
+	level := l.level
+	sinks := l.sinks
+	addCaller := l.addCaller
+	timeFormat := l.timeFormat
+	errorHandler := l.errorHandler
+	extractor := l.extractor
+	hooks := l.hooks
 	l.mu.RUnlock()
 
 	for i := 0; i < len(keyvals)-1; i += 2 {
@@ -182,11 +189,14 @@ func (l *Logger) With(keyvals ...any) *Logger {
 	}
 
 	return &Logger{
-		level:      l.level,
-		sinks:      l.sinks,
-		fields:     fields,
-		addCaller:  l.addCaller,
-		timeFormat: l.timeFormat,
+		level:        level,
+		sinks:        sinks,
+		fields:       fields,
+		addCaller:    addCaller,
+		timeFormat:   timeFormat,
+		errorHandler: errorHandler,
+		extractor:    extractor,
+		hooks:        hooks,
 	}
 }
 
@@ -225,13 +235,19 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, keyvals ...sl
 		l.mu.RUnlock()
 		return
 	}
-	sinks := l.sinks
+	sinks := append([]sink.Sink(nil), l.sinks...)
 	timeFormat := l.timeFormat
+	addCaller := l.addCaller
+	errorHandler := l.errorHandler
+	extractor := l.extractor
+	hooks := append([]Hook(nil), l.hooks...)
+	fields := make(map[string]any)
+	maps.Copy(fields, l.fields)
 	l.mu.RUnlock()
 
 	// Add context attributes if valid context and extractor is set
-	if ctx != nil && l.extractor != nil {
-		ctxAttrs := l.extractor(ctx)
+	if ctx != nil && extractor != nil {
+		ctxAttrs := extractor(ctx)
 		if len(ctxAttrs) > 0 {
 			// Prepend context attributes to avoid overriding explicit keyvals?
 			// Or append? Usually specific overrides general.
@@ -244,18 +260,13 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, keyvals ...sl
 	}
 
 	// Merge logger-level fields with call-site fields
-	fields := make(map[string]any)
-	l.mu.RLock()
-	maps.Copy(fields, l.fields)
-	l.mu.RUnlock()
-
 	for _, val := range keyvals {
 		fields[val.Key] = val.Value.Any()
 	}
 
 	// Get caller
 	caller := ""
-	if l.addCaller {
+	if addCaller {
 		caller = getCaller(3)
 	}
 
@@ -270,7 +281,7 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, keyvals ...sl
 	}
 
 	// Run hooks
-	for _, hook := range l.hooks {
+	for _, hook := range hooks {
 		if err := hook(ctx, entry); err != nil {
 			// Hook returned error/drop signal.
 			// We stop processing this entry.
@@ -280,8 +291,8 @@ func (l *Logger) log(ctx context.Context, level Level, msg string, keyvals ...sl
 
 	for _, s := range sinks {
 		if err := s.Write(entry); err != nil {
-			if l.errorHandler != nil {
-				l.errorHandler(err)
+			if errorHandler != nil {
+				errorHandler(err)
 			}
 		}
 	}

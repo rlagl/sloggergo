@@ -6,7 +6,7 @@ import (
 	"github.com/godeh/sloggergo/sink"
 )
 
-// NewFromConfig creates a new logger from a YAML configuration file.
+// NewFromConfig creates a new logger from a JSON configuration file.
 func NewFromConfig(path string) (*Logger, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -48,7 +48,17 @@ func NewFromConfigStruct(cfg *config.Config) (*Logger, error) {
 	}
 
 	if cfg.Logger.File.Enabled {
-		fileSink, err := sink.NewFile(cfg.Logger.File.Path, sink.WithFileFormatter(fmt))
+		fileOptions := []sink.FileOption{
+			sink.WithFileFormatter(fmt),
+		}
+		if cfg.Logger.File.MaxSizeMB > 0 {
+			fileOptions = append(
+				fileOptions,
+				sink.WithMaxSizeMB(cfg.Logger.File.MaxSizeMB),
+				sink.WithMaxBackups(cfg.Logger.File.MaxBackups),
+			)
+		}
+		fileSink, err := sink.NewFile(cfg.Logger.File.Path, fileOptions...)
 		if err != nil {
 			return nil, err
 		}

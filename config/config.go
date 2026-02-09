@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 // Config represents the complete logger configuration.
@@ -53,6 +54,11 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
@@ -64,6 +70,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Logger.Format == "" {
 		cfg.Logger.Format = "text"
+	}
+	if cfg.Logger.TimeFormat == "" {
+		cfg.Logger.TimeFormat = time.RFC3339Nano
+	}
+	if !hasLoggerField(raw, "add_caller") {
+		cfg.Logger.AddCaller = true
 	}
 
 	return &cfg, nil
@@ -87,6 +99,27 @@ func (c *Config) Validate() error {
 	if c.Logger.File.Enabled && c.Logger.File.Path == "" {
 		return fmt.Errorf("file path is required when file output is enabled")
 	}
+	if c.Logger.File.MaxSizeMB < 0 {
+		return fmt.Errorf("max_size_mb cannot be negative")
+	}
+	if c.Logger.File.MaxBackups < 0 {
+		return fmt.Errorf("max_backups cannot be negative")
+	}
 
 	return nil
+}
+
+func hasLoggerField(raw map[string]json.RawMessage, field string) bool {
+	rawLogger, ok := raw["logger"]
+	if !ok {
+		return false
+	}
+
+	var loggerFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawLogger, &loggerFields); err != nil {
+		return false
+	}
+
+	_, ok = loggerFields[field]
+	return ok
 }
