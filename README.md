@@ -9,7 +9,13 @@ Go structured logger with zero dependencies by default.
 - **Async Support**: Native asynchronous logging with buffering.
 - **Observability Ready**: Custom sinks are easy to build (example provided for Elasticsearch).
 
-## Usage
+## Installation
+
+```bash
+go get github.com/godeh/sloggergo
+```
+
+## Quick Start
 
 ```go
 package main
@@ -20,7 +26,6 @@ import (
 )
 
 func main() {
-    // Create a new logger writing to stdout
     log := sloggergo.New(
         sloggergo.WithLevel(sloggergo.InfoLevel),
         sloggergo.WithSink(sink.NewStdout()),
@@ -29,6 +34,24 @@ func main() {
 
     log.Info("Hello world")
 }
+```
+
+## Async Logging
+
+```go
+base := sloggergo.New(
+    sloggergo.WithLevel(sloggergo.InfoLevel),
+    sloggergo.WithSink(sink.NewStdout()),
+)
+asyncLog := sloggergo.NewAsync(
+    base,
+    sloggergo.WithBufferSize(1000),
+    sloggergo.WithWorkers(2),
+)
+
+defer asyncLog.Close()
+
+asyncLog.Info("logged asynchronously")
 ```
 
 ## JSON Configuration
@@ -54,10 +77,42 @@ func main() {
 }
 ```
 
+Load configuration:
+
+```go
+log, err := sloggergo.NewFromConfig("config.json")
+if err != nil {
+    panic(err)
+}
+
+defer log.Close()
+```
+
 Schema and defaults:
 - Schema: `config/schema.json`
 - Defaults: `level=info`, `format=text`, `time_format=RFC3339Nano`, `add_caller=true`, `stdout.enabled=false`, `file.enabled=false`.
-- Rotation: `max_size_mb>0` enables rotation. When rotating, the current file is renamed to `.1`, existing backups shift up to `.N` (`max_backups`). If `max_backups=0`, rotated files are discarded.
+
+Rotation behavior:
+- `max_size_mb>0` enables rotation.
+- On rotation, the current file becomes `.1` and existing backups shift up to `.N` (based on `max_backups`).
+- If `max_backups=0`, rotated files are discarded.
+
+## Custom Sinks
+
+Implement the `sink.Sink` interface:
+
+```go
+type MySink struct{}
+
+func (s *MySink) Write(entry *formatter.Entry) error {
+    // send entry somewhere
+    return nil
+}
+
+func (s *MySink) Close() error {
+    return nil
+}
+```
 
 ## Examples
 
